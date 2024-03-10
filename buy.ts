@@ -33,6 +33,7 @@ import bs58 from 'bs58';
 import * as fs from 'fs';
 import * as path from 'path';
 import BN from 'bn.js';
+import { isEmpty} from 'lodash';
 
 const transport = pino.transport({
   targets: [
@@ -175,14 +176,25 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
       return;
     }
 
+    const useRugPullCheck = retrieveEnvVariable('USE_RUGPULL_CHECK', logger) === 'true'
+
     if (CHECK_IF_MINT_IS_RENOUNCED) {
       const mintOption = await checkMintable(poolState.baseMint);
 
       if (mintOption !== true) {
-        logger.warn({ ...poolState, }, 'Skipping, owner can mint tokens!');
+        logger.warn({}, 'Skipping, owner can mint tokens!');
         return;
       }
     }
+
+    if (useRugPullCheck) {
+      const isPossibleRugPull = await isRugPull(poolState.baseMint.toString())
+
+      if (isPossibleRugPull) {
+        return;
+      }
+    }
+
 
     await buy(id, poolState);
 
@@ -207,6 +219,53 @@ export async function checkMintable(vault: PublicKey): Promise<boolean | undefin
   } catch (e) {
     logger.error({ mint: vault, error: e }, `Failed to check if mint is renounced`);
   }
+}
+
+interface Risk {
+  level: string,
+  name: string,
+  value: string,
+  score: number,
+  description: string
+}
+
+export async function isRugPull(address: string): Promise<boolean | undefined> {
+  if (isEmpty(address)) {
+    return true;
+  }
+
+  const minLiquitidyThreshold = Number(retrieveEnvVariable('MIN_LIQUIDITY_THRESHOLD', logger))
+
+  const url = `https://api.rugcheck.xyz/v1/tokens/${address}/report`
+  const result = await fetch(url)
+  const data = await result.json();
+
+  if (isEmpty(data)) {
+    logger.warn(`SKIPPING: We couldn't find the token in rugcheck.xyz. Token address: ${address}`)
+    return true;
+  }
+
+  const dangerRisks = data?.risks.filter((element: Risk) => element.level === 'danger')
+
+  if (isEmpty(dangerRisks)) {
+    return false;
+  }
+
+  const liquidityValue = dangerRisks.map((element: Risk) => {
+    if (element.name === 'Low Liquidity') {
+      return Number(element.value.replace(/\$/, ''))
+    }
+  })
+
+  if (!isEmpty(liquidityValue) && minLiquitidyThreshold > 0 && liquidityValue < minLiquitidyThreshold) {
+    logger.warn(`SKIPPING: Liquidity is to low - $${liquidityValue}`)
+    return true;
+  }
+
+  const dangerDescriptions = dangerRisks.map((element: Risk) => element.description)
+  logger.warn(dangerDescriptions, 'SKIPPING: Too many danger risks')
+
+  return true;
 }
 
 export async function processOpenBookMarket(
