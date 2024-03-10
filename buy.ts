@@ -94,8 +94,10 @@ const USE_SNIPE_LIST = retrieveEnvVariable('USE_SNIPE_LIST', logger) === 'true';
 const SNIPE_LIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('SNIPE_LIST_REFRESH_INTERVAL', logger));
 const AUTO_SELL = retrieveEnvVariable('AUTO_SELL', logger) === 'true';
 const SELL_DELAY = Number(retrieveEnvVariable('SELL_DELAY', logger));
+const MAX_BUY_ORDERS = Number(retrieveEnvVariable('MAX_BUY_ORDERS', logger))
 const MAX_SELL_RETRIES = 60;
 
+let currentOrders = 0;
 let snipeList: string[] = [];
 
 async function init(): Promise<void> {
@@ -287,6 +289,11 @@ export async function processOpenBookMarket(
 }
 
 async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise<void> {
+  if (currentOrders >= MAX_BUY_ORDERS && MAX_BUY_ORDERS > 0) {
+    logger.warn('SKIPPING: You reached you max buy orders')
+    return
+  }
+
   let tokenAccount = existingTokenAccounts.get(accountData.baseMint.toString());
 
   if (!tokenAccount) {
@@ -334,6 +341,7 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
     maxRetries: 20,
     preflightCommitment: commitment,
   });
+  currentOrders++;
   logger.info(
     {
       mint: accountData.baseMint,
@@ -393,6 +401,7 @@ async function sell(accountData: LiquidityStateV4, poolKeys: LiquidityPoolKeys):
           maxRetries: 5,
           preflightCommitment: commitment,
         });
+        currentOrders--;
         logger.info(
           {
             mint: accountData.baseMint,
