@@ -178,6 +178,11 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
       return;
     }
 
+    if (currentOrders >= MAX_BUY_ORDERS && MAX_BUY_ORDERS > 0) {
+      logger.warn('SKIPPING: You reached you max buy orders')
+      return
+    }
+
     const useRugPullCheck = retrieveEnvVariable('USE_RUGPULL_CHECK', logger) === 'true'
 
     if (CHECK_IF_MINT_IS_RENOUNCED) {
@@ -193,6 +198,7 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
       const isPossibleRugPull = await isRugPull(poolState.baseMint.toString())
 
       if (isPossibleRugPull) {
+        logger.warn('SKIPPING: Rug pull detected')
         return;
       }
     }
@@ -247,6 +253,10 @@ export async function isRugPull(address: string): Promise<boolean | undefined> {
     return true;
   }
 
+  if (data?.tokenMeta.mutable) {
+    return true;
+  }
+
   const dangerRisks = data?.risks.filter((element: Risk) => element.level === 'danger')
 
   if (isEmpty(dangerRisks)) {
@@ -289,10 +299,6 @@ export async function processOpenBookMarket(
 }
 
 async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise<void> {
-  if (currentOrders >= MAX_BUY_ORDERS && MAX_BUY_ORDERS > 0) {
-    logger.warn('SKIPPING: You reached you max buy orders')
-    return
-  }
 
   let tokenAccount = existingTokenAccounts.get(accountData.baseMint.toString());
 
