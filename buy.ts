@@ -253,8 +253,12 @@ export async function isRugPull(address: string): Promise<boolean | undefined> {
     return true;
   }
 
-  if (data?.tokenMeta.mutable) {
+  if (data?.tokenMeta?.mutable) {
     return true;
+  }
+
+  if (isEmpty(data.risks)) {
+    return false;
   }
 
   const dangerRisks = data?.risks.filter((element: Risk) => element.level === 'danger')
@@ -263,14 +267,15 @@ export async function isRugPull(address: string): Promise<boolean | undefined> {
     return false;
   }
 
-  const liquidityValue = dangerRisks.map((element: Risk) => {
+  const liquidity = dangerRisks.map((element: Risk) => {
     if (element.name === 'Low Liquidity') {
-      return Number(element.value.replace(/\$/, ''))
+      element.value = element.value.replace(/\$/, '')
+      return element
     }
   })
-
-  if (!isEmpty(liquidityValue) && minLiquitidyThreshold > 0 && liquidityValue < minLiquitidyThreshold) {
-    logger.warn(`SKIPPING: Liquidity is to low - $${liquidityValue}`)
+  const liquidityValue = Number(liquidity?.value) || 0
+  if (minLiquitidyThreshold > 0 && liquidity?.value < minLiquitidyThreshold) {
+    logger.warn(`SKIPPING: Liquidity is to low - $${liquidity.value}`)
     return true;
   }
 
