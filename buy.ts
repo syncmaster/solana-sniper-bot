@@ -34,7 +34,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import BN from 'bn.js';
 import { isEmpty} from 'lodash';
-
 const transport = pino.transport({
   targets: [
     // {
@@ -198,7 +197,6 @@ export async function processRaydiumPool(id: PublicKey, poolState: LiquidityStat
       const isPossibleRugPull = await isRugPull(poolState.baseMint.toString())
 
       if (isPossibleRugPull) {
-        logger.warn('SKIPPING: Rug pull detected')
         return;
       }
     }
@@ -253,6 +251,11 @@ export async function isRugPull(address: string): Promise<boolean | undefined> {
     return true;
   }
 
+  if (!isEmpty(data.error)) {
+    logger.warn(`SKIPPING: ${data.error}`)
+    return true;
+  }
+
   if (data?.tokenMeta?.mutable) {
     return true;
   }
@@ -261,11 +264,24 @@ export async function isRugPull(address: string): Promise<boolean | undefined> {
     return false;
   }
 
-  const dangerRisks = data?.risks.filter((element: Risk) => element.level === 'danger')
+  if (data?.score > 500) {
+    logger.warn('SKIPPING: The score of the token is to high - ' + data.score)
+    return true;
+  }
 
-  if (isEmpty(dangerRisks)) {
+  const dangerRisks = data?.risks.filter((element: Risk) => element.level === 'danger') || []
+  const warningRisks = data?.risks.filter((element: Risk) => element.level === 'warn') || []
+
+  if (isEmpty(dangerRisks) && isEmpty(warningRisks)) {
     return false;
   }
+
+  const lowAmountOfLPProviders = warningRisks.filter((element: Risk) => element.name === 'Low amount of LP Providers');
+  if (!isEmpty(lowAmountOfLPProviders)) {
+    logger.warn('SKIPPING: Low amount of LP Providers')
+    return true;
+  }
+
 
   const liquidity = dangerRisks.map((element: Risk) => {
     if (element.name === 'Low Liquidity') {
@@ -361,6 +377,9 @@ async function buy(accountId: PublicKey, accountData: LiquidityStateV4): Promise
     },
     'Buy',
   );
+  fs.appendFile(path.join(__dirname, 'bought_tokens.txt'),  `https://dexscreener.com/solana/${accountData.baseMint}?maker=${wallet.publicKey} \n`, (err) => {
+    logger.error({...err}, 'error saving token to the file')
+  })
 }
 
 async function sell(accountData: LiquidityStateV4, poolKeys: LiquidityPoolKeys): Promise<void> {
